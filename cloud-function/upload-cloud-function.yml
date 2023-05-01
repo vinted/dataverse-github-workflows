@@ -1,0 +1,57 @@
+
+ 
+
+name: upload-cloud-function 
+
+on:
+  workflow_call:
+    inputs:
+      cf-folder:
+        description: "cloud function folder"
+        required: true
+        type: string
+      release-tag:
+        description: "release tag"
+        required: true
+        type: string
+      gcp_service_account:
+        description: "Email address or unique identifier of the Google Cloud service account"
+        type: string
+        default: ${{ vars.SERVICE_ACCOUNT_EMAIL }}
+      workload_identity_provider:
+        description: "The full identifier of the Workload Identity Provider, including the project number, pool name, and provider name."
+        type: string
+        default: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+      gcp_bucket:
+        description: "destination gcp bucket where CF zip files are stored"
+        type: string
+        default: dv-cm-shared-cloud-functions
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    if: "${{ inputs.release-tag != '' }}"
+    steps:
+
+      - uses: 'actions/checkout@v3'
+
+      - id: 'archive'
+        run: |
+          zip_target=${{ inputs.cf-folder }}-v${{ inputs.release-tag }}.zip
+          cd ${{ inputs.cf-folder }} && zip -r "${zip_target}" .
+          echo "zip_file=${{ inputs.cf-folder }}/${zip_target}" >> ${GITHUB_OUTPUT}
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          workload_identity_provider: ${{ inputs.workload_identity_provider }}
+          service_account: ${{ inputs.gcp_service_account }}
+          access_token_lifetime: 300s
+
+      - id: 'upload-archive'
+        uses:  'google-github-actions/upload-cloud-storage@v1'
+        with:
+          path: ${{ steps.archive.outputs.zip_file }}
+          destination: ${{ inputs.gcp_bucket }}/${{ inputs.cf-folder }}

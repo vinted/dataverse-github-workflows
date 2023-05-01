@@ -1,0 +1,56 @@
+name: poetry-bump-version
+
+on:
+  workflow_call:
+    inputs:
+      cf-folder:
+        description: "cloud function folder"
+        required: true
+        type: string
+      poetry-version:
+        description: "The version of Poetry to install"
+        type: string
+        default: "1.4.1"
+    secrets:
+      GH_PRIVATE_ACCESS_TOKEN:
+        required: true
+    outputs:
+      new-version: 
+        description: new release
+        value: ${{ jobs.poetry.outputs.new-version }}
+
+jobs:
+  poetry:
+    runs-on: ubuntu-latest
+    outputs:
+      new-version: ${{ steps.bump-version.outputs.new-version }}
+      
+    steps:
+      - uses: 'actions/checkout@v3'
+        with:
+          token: ${{ secrets.GH_PRIVATE_ACCESS_TOKEN }}
+      
+      - id: setup-python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10.8"
+
+      - id: install-poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: ${{ inputs.poetry-version }}
+
+      - id: install-bump-version-plugin
+        run: poetry self add poetry-bumpversion
+
+      - id: 'bump-version'
+        run: |
+          cd ${{ inputs.cf-folder }}
+          poetry version patch
+          echo "new-version=$(poetry version --short)" >> $GITHUB_OUTPUT
+      
+      - uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: bump version of ${{ inputs.cf-folder }}
+          commit_user_name: dataverse-bot
+          commit_user_email: sa-dataverse-bot@vinted.com
