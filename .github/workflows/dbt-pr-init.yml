@@ -3,7 +3,7 @@ name: dbt-pr-init
 on:
   workflow_call:
     secrets:
-      GITHUB_TOKEN:
+      ghPAT:
         required: true
     outputs:
       git_branch_sha: 
@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/labeler@v3
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          repo-token: "${{ secrets.ghPAT }}"
 
   
   pr-semantic:
@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: amannn/action-semantic-pull-request@v5
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ghPAT }}
         with:
           types: |
             fix
