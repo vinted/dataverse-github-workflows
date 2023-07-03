@@ -5,6 +5,10 @@ on:
     secrets:
       GITHUB_TOKEN:
         required: true
+    outputs:
+      git_branch_sha: 
+        description: Github PR Hash
+        value: ${{ jobs.generate-branch-sha.outputs.git_branch_sha }}
 
 jobs:
 
