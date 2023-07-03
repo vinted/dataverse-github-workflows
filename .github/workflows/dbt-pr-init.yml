@@ -1,0 +1,61 @@
+name: dbt-pr-init
+
+on:
+  workflow_call:
+    secrets:
+      GITHUB_TOKEN:
+        required: true
+
+jobs:
+
+  generate-branch-sha:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_REF_NAME: ${{ github.head_ref }}
+    outputs:
+      git_branch_sha: ${{ steps.branch_sha.outputs.git_branch_sha }}
+    steps:
+      - name: Generate Branch SHA
+        id: branch_sha
+        run: |
+          git_branch_sha=$(echo -n  "${{ env.GITHUB_REF_NAME }}" | sha256sum | tr -d "[:space:]-" | cut -c -8)
+          echo "git_branch_sha=$git_branch_sha" >> "$GITHUB_OUTPUT"
+
+
+  labeler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v3
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+
+  
+  pr-semantic:
+    needs : generate-branch-sha
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            fix
+            feat
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+
+  skip-draft:
+    needs : [pr-semantic]
+    runs-on: ubuntu-latest
+    steps:
+      - if: github.event.pull_request.draft == true
+        run: |
+          echo "Fails in order to indicate that pull request needs to be marked as ready to review and workflow needs to pass."
+          exit 1
