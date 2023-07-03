@@ -54,12 +54,3 @@ jobs:
             ci
             chore
             revert
-
-  skip-draft:
-    needs : [pr-semantic]
-    runs-on: ubuntu-latest
-    steps:
-      - if: github.event.pull_request.draft == true
-        run: |
-          echo "Fails in order to indicate that pull request needs to be marked as ready to review and workflow needs to pass."
-          exit 1
