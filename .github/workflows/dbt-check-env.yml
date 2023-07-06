@@ -40,7 +40,8 @@ jobs:
           IFS=', ' read -r -a array <<< ${{ inputs.composer_vars }}
           for variable_name in "${array[@]}" 
           do 
-            if [ -z "${{ vars.${variable_name}" }} ]; then
+            variable="vars.${variable_name}"
+            if [ -z "${{ vars.${variable_name} }}" }} ]; then
               echo "${variable_name} variable is not set or empty"
               exit 1
             fi
