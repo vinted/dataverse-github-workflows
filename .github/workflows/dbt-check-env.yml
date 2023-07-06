@@ -33,7 +33,7 @@ on:
 jobs:
   check-dbt-vars:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.test }}
+    environment: ${{ inputs.env_id }}
     steps:
       - id: validate-env-vars
         run: |
