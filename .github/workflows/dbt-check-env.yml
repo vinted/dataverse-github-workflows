@@ -25,7 +25,7 @@ on:
         type: string
         default: test
     secrets:
-      GH_PRIVATE_ACCESS_TOKEN:
+      GH_SECRET_PRIVATE_ACCESS_TOKEN:
         required: true
       GH_SECRET_PRIVATE_ACCESS_NAME:
         required: true
