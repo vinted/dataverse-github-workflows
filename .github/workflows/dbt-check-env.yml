@@ -41,6 +41,7 @@ jobs:
           for variable_name in vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME vars.COMPOSER_AIRFLOW_URL
           do 
             echo "variable=${variable_name}" >> $GITHUB_ENV
+            echo variable: ${{ env.variable }}
             if [ -z ${{ env.variable }} ]; then
               echo "${variable_name} variable is not set or empty"
               exit 1
