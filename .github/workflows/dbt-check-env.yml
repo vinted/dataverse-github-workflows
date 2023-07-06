@@ -20,7 +20,10 @@ on:
       workload_identity_provider:
         type: string
         default: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
-
+      env_id: 
+        description: "environment id. possible values 'test' or 'prod' "
+        type: string
+        default: test
     secrets:
       GH_PRIVATE_ACCESS_TOKEN:
         required: true
@@ -30,13 +33,14 @@ on:
 jobs:
   check-dbt-vars:
     runs-on: ubuntu-latest
+    environment: ${{ inputs.test }}
     steps:
       - id: validate-env-vars
         run: |
           IFS=', ' read -r -a array <<< ${{ inputs.composer_vars }}
           for variable_name in "${array[@]}" 
           do 
-            if [ -z ${{ vars.${variable_name} }} ]; then
+            if [ -z "${{ vars.${variable_name}" }} ]; then
               echo "${variable_name} variable is not set or empty"
               exit 1
             fi
