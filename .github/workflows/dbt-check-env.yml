@@ -1,0 +1,45 @@
+name: dbt-check-env
+
+on:
+  workflow_call:
+    inputs:
+      artifact_registry_host:
+        type: string
+        default: ${{ vars.ARTIFACT_REGISTRY_HOST }}
+      composer_vars:
+        type: string
+        description: "List of comma seperated composer environment variables"
+        default: "COMPOSER_AIRFLOW_SECRET_FILE_NAME, COMPOSER_AIRFLOW_URL, COMPOSER_ENVIRONMENT_NAME, COMPOSER_GCP_PROJECT, COMPOSER_GCS_BUCKET_NAME, COMPOSER_LOCATION"
+      dbt_deploy_service_account_email:
+        type: string
+        default: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+      test_dataset_label:
+        description: "Comma seperated key,value labels associated with test datasets"
+        type: string
+        default: "TEST_DATASET_LABEL_KEY, TEST_DATASET_LABEL_VALUE"
+      workload_identity_provider:
+        type: string
+        default: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+
+    secrets:
+      GH_PRIVATE_ACCESS_TOKEN:
+        required: true
+      GH_SECRET_PRIVATE_ACCESS_NAME:
+        required: true
+
+jobs:
+  check-dbt-vars:
+    runs-on: ubuntu-latest
+    steps:
+      - id: validate-env-vars
+        run: |
+          IFS=', ' read -r -a array <<< ${{ inputs.composer_vars }}
+          for variable_name in "${array[@]}" 
+          do 
+            if [ -z ${{ vars.${variable_name} }} ]; then
+              echo "${variable_name} variable is not set or empty"
+              exit 1
+            fi
+          done
+
+
