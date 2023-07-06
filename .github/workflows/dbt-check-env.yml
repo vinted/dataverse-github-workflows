@@ -37,9 +37,8 @@ jobs:
     steps:
       - id: validate-env-vars
         run: |
-          set -x
-          IFS=', ' read -r -a array <<< ${{ inputs.composer_vars }}
-          for variable_name in "${array[@]}" 
+          #IFS=', ' read -r -a array <<< ${{ inputs.composer_vars }}
+          for variable_name in vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME vars.COMPOSER_AIRFLOW_URL
           do 
             echo "variable=${variable_name}" >> $GITHUB_ENV
             if [ -z ${{ env.variable }} ]; then
