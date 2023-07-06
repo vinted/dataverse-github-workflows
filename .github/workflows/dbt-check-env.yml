@@ -42,9 +42,9 @@ on:
         default: test
     secrets:
       GH_SECRET_PRIVATE_ACCESS_TOKEN:
-        required: true
+        required: false
       GH_SECRET_PRIVATE_ACCESS_NAME:
-        required: true
+        required: false
 
 jobs:
   check-env-vars:
