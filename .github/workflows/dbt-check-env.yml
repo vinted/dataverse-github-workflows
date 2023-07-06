@@ -41,7 +41,7 @@ jobs:
           for variable_name in "${array[@]}" 
           do 
             variable="vars.${variable_name}"
-            if [ -z "${{ vars.${variable_name} }}" }} ]; then
+            if [ -z "${{ $variable }}" ]; then
               echo "${variable_name} variable is not set or empty"
               exit 1
             fi
