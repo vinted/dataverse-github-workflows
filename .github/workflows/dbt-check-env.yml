@@ -52,6 +52,7 @@ jobs:
     environment: ${{ inputs.env_id }}
     steps:
       - run: |
+          echo artifact_registry_host : ${{ inputs.artifact_registry_host }}
           if [ -z ${{ inputs.artifact_registry_host }} ]; then
             echo "ARTIFACT_REGISTRY_HOST secret is not set or empty"
             exit 1
