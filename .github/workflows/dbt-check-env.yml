@@ -42,13 +42,14 @@ on:
         default: test
     secrets:
       GH_SECRET_PRIVATE_ACCESS_TOKEN:
-        required: false
+        required: true
       GH_SECRET_PRIVATE_ACCESS_NAME:
-        required: false
+        required: true
 
 jobs:
   check-env-vars:
     runs-on: ubuntu-latest
+    environment: test
     steps:
       - run: |
           echo artifact_registry_host : ${{ inputs.artifact_registry_host }}
