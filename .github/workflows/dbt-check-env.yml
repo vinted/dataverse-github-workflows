@@ -49,12 +49,17 @@ on:
 jobs:
   check-env-vars:
     runs-on: ubuntu-latest
-    environment: test
+    environment: ${{ inputs.env_id }}
     steps:
       - run: |
-          echo artifact_registry_host : ${{ vars.ARTIFACT_REGISTRY_HOST }}
-          if [ -z ${{ vars.ARTIFACT_REGISTRY_HOST }} ]; then
-            echo "ARTIFACT_REGISTRY_HOST secret is not set or empty"
-            exit 1
+          var_list="ARTIFACT_REGISTRY_HOST, WORKLOAD_IDENTITY_PROVIDER"
+          IFS=', ' read -r -a array <<< "${var_list}"
+          for element in "${array[@]}"
+          do
+            echo "element=$element" >> $GITHUB_ENV
+            if [ -z ${{ vars.[env.element] }} ]; then
+              echo "$element is not set or empty"
+              exit 1
           fi
+    
 
