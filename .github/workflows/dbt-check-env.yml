@@ -49,7 +49,6 @@ on:
 jobs:
   check-env-vars:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.env_id }}
     steps:
       - run: |
           echo artifact_registry_host : ${{ inputs.artifact_registry_host }}
