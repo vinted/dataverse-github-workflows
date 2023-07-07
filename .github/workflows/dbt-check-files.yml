@@ -1,0 +1,92 @@
+name: dbt-check-files
+
+on:
+  workflow_call:
+    inputs:
+      dirs-matrix:
+        type: string
+        required: true
+        description: list of changed dirs
+      env_id:
+        type: string
+        required: true
+        description: environment id. test or prod.
+    secrets:
+      ghPAT:
+        required: true
+    outputs:
+      matrix: 
+        description: List of changed directories
+        value: ${{ jobs.list-changed-dirs.outputs.matrix }}
+      matrix-length:
+        description: length of the changed dirs 
+        value: ${{ jobs.list-changed-dirs.outputs.matrix-length }}
+
+jobs:
+  dbt-check-files:
+    environment: ${{ inputs.env_id }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.ghPAT }}
+      - name: Check required dbt files
+        working-directory: ${{ inputs.dirs-matrix }}
+        run: |
+          airflow_file=${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
+          required_files=( \
+            $airflow_file \
+            dbt_project.yml \
+            yamllint-config.yaml \
+            .sqlfluff \
+            profiles.yml)
+          
+          for file in "${required_files[@]}"; do
+            if [ -e $file ]; then
+              echo "required file $file does not exists."
+              exit 1
+            fi
+          done
+
+      - name: Check profiles.yml file schema
+        working-directory: ${{ inputs.dirs-matrix }}
+        run: |
+          if [[ $(yq -r '.*.outputs.test.schema | select(. != null)' profiles.yml) != "{{ env_var('GIT_BRANCH_SHA') }}" ]]; then
+            echo "profiles.yml test schema changed, should be \"{{ env_var('GIT_BRANCH_SHA') }}\""
+          fi
+          
+      - name: Checking ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} values
+        working-directory: ${{ inputs.dirs-matrix }}
+        run: |
+          operator=$(grep 'OPERATOR:' ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}')
+          if [[ $operator != "k8s" ]]; then
+            echo "OPERATOR should be set to 'k8s'"
+            exit 1
+          fi
+          else
+            required_attributes=( \ 
+              DAG_ID \
+              DAG_TAG \
+              DAG_SCHEDULE_INTERVAL \
+              MANIFEST_NAME \
+              DBT_SEED \
+              DBT_SNAPSHOT \
+              DBT_SEED_SHARDING \ 
+              DBT_SNAPSHOT_SHARDING \
+              DATA_QUALITY \
+              GIT_URL \
+              NAMESPACE \
+              PLATFORM \
+              POD_NAME \ 
+              DBT_PROJECT_NAME)
+            
+            for attribute in "${required_attributes[@]}"; do
+              if [[ $(grep "${attribute}:" ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}') == "" ]]; then
+                echo "Required attriute: ${attribute} is missing in file ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}"
+                exit 1
+              fi
+            done
