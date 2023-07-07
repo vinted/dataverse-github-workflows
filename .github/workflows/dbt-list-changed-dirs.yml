@@ -1,0 +1,32 @@
+name: dbt-list-changed-dirs
+
+on:
+  workflow_call:
+    secrets:
+      ghPAT:
+        required: true
+    outputs:
+      matrix: 
+        description: List of changed directories
+        value: ${{ jobs.list-changed-dirs.outputs.git_branch_sha }}
+      matrix-length:
+        description: length of the changed dirs 
+        value: 
+
+
+jobs:
+  list-changed-dirs:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix-length: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.ghPAT }}
+      - id: set-matrix
+        run: |
+          matrix=$(git diff --dirstat=files --name-only HEAD~1 | awk '!/shared/' | awk '!/.github/' | awk '!/.gitignore/' | cut -f1 -d'/' | uniq | sed '/^$/d' | jq -R -s -c 'split("\n")[:-1]')
+          echo "matrix=${matrix}" >> $GITHUB_OUTPUT
+          echo "matrix-length=$(echo ${matrix} | jq length)" >> $GITHUB_OUTPUT
