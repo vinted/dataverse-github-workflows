@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 2
           token: ${{ secrets.ghPAT }}
       - name: Check required dbt files
-        working-directory: ${{ inputs.dirs-matrix }}
+        working-directory: ${{ matrix.dirs }}
         run: |
           airflow_file=${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
           required_files=( \
@@ -46,14 +46,14 @@ jobs:
           done
 
       - name: Check profiles.yml file schema
-        working-directory: ${{ inputs.dirs-matrix }}
+        working-directory: ${{ matrix.dirs }}
         run: |
           if [[ $(yq -r '.*.outputs.test.schema | select(. != null)' profiles.yml) != "{{ env_var('GIT_BRANCH_SHA') }}" ]]; then
             echo "profiles.yml test schema changed, should be \"{{ env_var('GIT_BRANCH_SHA') }}\""
           fi
 
       - name: Checking ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} values
-        working-directory: ${{ inputs.dirs-matrix }}
+        working-directory: ${{ matrix.dirs }}
         run: |
           operator=$(grep 'OPERATOR:' ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}')
           if [[ $operator != "k8s" ]]; then
