@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+        dirs: ${{ fromJson(${{ inputs.dirs-matrix }}) }} 
     steps:
       - uses: actions/checkout@v3
         with:
