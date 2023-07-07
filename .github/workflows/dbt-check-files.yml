@@ -14,13 +14,6 @@ on:
     secrets:
       ghPAT:
         required: true
-    outputs:
-      matrix: 
-        description: List of changed directories
-        value: ${{ jobs.list-changed-dirs.outputs.matrix }}
-      matrix-length:
-        description: length of the changed dirs 
-        value: ${{ jobs.list-changed-dirs.outputs.matrix-length }}
 
 jobs:
   dbt-check-files:
@@ -58,7 +51,7 @@ jobs:
           if [[ $(yq -r '.*.outputs.test.schema | select(. != null)' profiles.yml) != "{{ env_var('GIT_BRANCH_SHA') }}" ]]; then
             echo "profiles.yml test schema changed, should be \"{{ env_var('GIT_BRANCH_SHA') }}\""
           fi
-          
+
       - name: Checking ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} values
         working-directory: ${{ inputs.dirs-matrix }}
         run: |
