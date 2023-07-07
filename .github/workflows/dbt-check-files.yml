@@ -31,8 +31,7 @@ jobs:
         working-directory: ${{ matrix.dirs }}
         run: |
           airflow_file=${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
-          required_files=( \
-            $airflow_file \
+          required_files=($airflow_file \
             dbt_project.yml \
             yamllint-config.yaml \
             .sqlfluff \
@@ -61,8 +60,7 @@ jobs:
             exit 1
           fi
           
-          required_attributes=( \ 
-            DAG_ID \
+          required_attributes=(DAG_ID \
             DAG_TAG \
             DAG_SCHEDULE_INTERVAL \
             MANIFEST_NAME \
