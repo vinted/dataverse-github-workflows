@@ -39,7 +39,7 @@ jobs:
             profiles.yml)
           
           for file in "${required_files[@]}"; do
-            if [ -e $file ]; then
+            if [ ! -f $file ]; then
               echo "required file $file does not exists."
               exit 1
             fi
