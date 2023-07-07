@@ -3,41 +3,8 @@ name: dbt-check-env
 on:
   workflow_call:
     inputs:
-      artifact_registry_host:
-        type: string
-        default: ${{ vars.ARTIFACT_REGISTRY_HOST }}
-      composer_airflow_secret_file_name:
-        type: string
-        default: ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
-      composer_airflow_url:
-        type: string
-        default: ${{ vars.COMPOSER_AIRFLOW_URL }}
-      composer_environment_name:
-        type: string
-        default: ${{ vars.COMPOSER_ENVIRONMENT_NAME }}
-      composer_gcp_project:
-        type: string
-        default: ${{ vars.COMPOSER_GCP_PROJECT }}
-      composer_gcs_bucket_name:
-        type: string
-        default: ${{ vars.COMPOSER_GCS_BUCKET_NAME }}
-      composer_location:
-        type: string
-        default: ${{ vars.COMPOSER_LOCATION }}
-      dbt_deploy_service_account_email:
-        type: string
-        default: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
-      test_dataset_label_key:
-        type: string
-        default: ${{ vars.TEST_DATASET_LABEL_KEY }}
-      test_dataset_label_value:
-        type: string
-        default: ${{ vars.TEST_DATASET_LABEL_VALUE }}
-      workload_identity_provider:
-        type: string
-        default: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
       env_id: 
-        description: "valid ids: test or prod"
+        description: "Whether to use 'test' or 'prod' environment"
         type: string
         default: test
     secrets:
@@ -47,19 +14,62 @@ on:
         required: true
 
 jobs:
-  check-env-vars:
+  check-required-vars:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env_id }}
     steps:
       - run: |
-          var_list="ARTIFACT_REGISTRY_HOST, WORKLOAD_IDENTITY_PROVIDER"
-          IFS=', ' read -r -a array <<< "${var_list}"
-          for element in "${array[@]}"
-          do
-            echo "element=$element" >> $GITHUB_ENV
-            if [ -z ${{ vars.[env.element] }} ]; then
-              echo "$element is not set or empty"
-              exit 1
+          if [ -z ${{ secrets.GH_SECRET_PRIVATE_ACCESS_NAME }} ]; then
+            echo "GH_SECRET_PRIVATE_ACCESS_NAME secret is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ secrets.GH_SECRET_PRIVATE_ACCESS_TOKEN }} ]; then
+            echo "GH_SECRET_PRIVATE_ACCESS_TOKEN secret is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.ARTIFACT_REGISTRY_HOST }} ]; then
+            echo "ARTIFACT_REGISTRY_HOST variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} ]; then
+            echo "COMPOSER_AIRFLOW_SECRET_FILE_NAME variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_AIRFLOW_URL }} ]; then
+            echo "COMPOSER_AIRFLOW_URL variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_ENVIRONMENT_NAME }} ]; then
+            echo "COMPOSER_ENVIRONMENT_NAME variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_GCP_PROJECT }} ]; then
+            echo "COMPOSER_GCP_PROJECT variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_GCS_BUCKET_NAME }} ]; then
+            echo "COMPOSER_GCS_BUCKET_NAME variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.COMPOSER_LOCATION }} ]; then
+            echo "COMPOSER_LOCATION variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }} ]; then
+            echo "DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.TEST_DATASET_LABEL_KEY }} ]; then
+            echo "TEST_DATASET_LABEL_KEY variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.TEST_DATASET_LABEL_VALUE }} ]; then
+            echo "TEST_DATASET_LABEL_VALUE variable is not set or empty"
+            exit 1
+          fi
+          if [ -z ${{ vars.WORKLOAD_IDENTITY_PROVIDER }} ]; then
+            echo "WORKLOAD_IDENTITY_PROVIDER variable is not set or empty"
+            exit 1
           fi
     
 
