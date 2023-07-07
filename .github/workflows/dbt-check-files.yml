@@ -60,26 +60,26 @@ jobs:
             echo "OPERATOR should be set to 'k8s'"
             exit 1
           fi
-          else
-            required_attributes=( \ 
-              DAG_ID \
-              DAG_TAG \
-              DAG_SCHEDULE_INTERVAL \
-              MANIFEST_NAME \
-              DBT_SEED \
-              DBT_SNAPSHOT \
-              DBT_SEED_SHARDING \ 
-              DBT_SNAPSHOT_SHARDING \
-              DATA_QUALITY \
-              GIT_URL \
-              NAMESPACE \
-              PLATFORM \
-              POD_NAME \ 
-              DBT_PROJECT_NAME)
-            
-            for attribute in "${required_attributes[@]}"; do
-              if [[ $(grep "${attribute}:" ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}') == "" ]]; then
-                echo "Required attriute: ${attribute} is missing in file ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}"
-                exit 1
-              fi
-            done
+          
+          required_attributes=( \ 
+            DAG_ID \
+            DAG_TAG \
+            DAG_SCHEDULE_INTERVAL \
+            MANIFEST_NAME \
+            DBT_SEED \
+            DBT_SNAPSHOT \
+            DBT_SEED_SHARDING \ 
+            DBT_SNAPSHOT_SHARDING \
+            DATA_QUALITY \
+            GIT_URL \
+            NAMESPACE \
+            PLATFORM \
+            POD_NAME \ 
+            DBT_PROJECT_NAME)
+          
+          for attribute in "${required_attributes[@]}"; do
+            if [[ $(grep "${attribute}:" ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}') == "" ]]; then
+              echo "Required attriute: ${attribute} is missing in file ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}"
+              exit 1
+            fi
+          done
