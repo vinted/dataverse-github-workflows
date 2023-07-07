@@ -8,10 +8,10 @@ on:
     outputs:
       matrix: 
         description: List of changed directories
-        value: ${{ jobs.list-changed-dirs.outputs.git_branch_sha }}
+        value: ${{ jobs.list-changed-dirs.outputs.matrix }}
       matrix-length:
         description: length of the changed dirs 
-        value: 
+        value: ${{ jobs.list-changed-dirs.outputs.matrix-length }}
 
 
 jobs:
