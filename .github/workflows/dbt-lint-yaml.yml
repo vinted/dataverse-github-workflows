@@ -1,0 +1,56 @@
+name: dbt-lint-yaml
+
+on:
+  workflow_call:
+    inputs:
+      dirs-matrix:
+        type: string
+        required: true
+        description: list of changed dirs
+      env_id:
+        type: string
+        required: true
+        description: environment id. test or prod.
+    secrets:
+      ghPAT:
+        required: true
+
+jobs:
+  lint-yaml:
+    environment: ${{ inputs.env_id }}
+    runs-on: ubuntu-latest
+    container:
+      image: cytopia/yamllint
+    strategy:
+      matrix:
+        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.ghPAT }}
+      - name: lint
+        working-directory: ${{ matrix.dirs }}
+        run: yamllint -c yamllint-config.yaml -f colored . 2>&1 | tee -a yamllint_lint.log
+
+      - name: Check YAML lint output
+        continue-on-error: true
+        working-directory: ${{ matrix.dirs }}
+        run: |
+              while read line
+              do
+                read_line=$(echo "${line}" | grep -io  "error" | wc -l) || true
+                if [[ $read_line = 1 ]];then
+                    echo 'Error found in SQL Lint Log File.'
+                    sleep 5
+                    exit 1
+                fi
+              done < yamllint_lint.log
+      - name: Archive report artifacts
+        uses: actions/upload-artifact@v3
+        continue-on-error: true
+        with:
+          name: lint-output
+          retention-days: 7
+          path: |
+            ${{ matrix.dirs }}/yamllint_lint.log
