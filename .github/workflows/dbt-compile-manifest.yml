@@ -197,7 +197,7 @@ jobs:
                 fi
 
       - name: Compile and Upload DBT (PROD)
-        id: 'check-required-vars-prod'
+        id: 'compile-and-upload-prod'
         if: ${{ inputs.env_id == 'prod' }}
         uses: addnab/docker-run-action@v3
         with:

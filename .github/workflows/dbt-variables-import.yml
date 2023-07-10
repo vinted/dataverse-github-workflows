@@ -1,0 +1,267 @@
+name: dbt-variables-import
+
+on:
+  workflow_call:
+    inputs:
+      dirs-matrix:
+        type: string
+        required: true
+        description: list of changed dirs
+      git_branch_sha: 
+        description: "git branch hash"
+        type: string
+        required: true
+      dbt-target:
+        description: "DBT target"
+        type: string
+        default: test
+      env_id:
+        type: string
+        required: true
+        description: environment id. test or prod.
+    secrets:
+      ghPAT:
+        required: true
+
+jobs:
+  compile-manifest:
+    environment: ${{ inputs.env_id }}
+    runs-on: ubuntu-latest
+    env:
+      DBT_TARGET: ${{ inputs.dbt-target }}
+      airflow_secret_file_name: ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
+      airflow_url: ${{ vars.COMPOSER_AIRFLOW_URL }}
+      project_id: ${{ vars.COMPOSER_GCP_PROJECT }}
+      location: ${{ vars.COMPOSER_LOCATION }}
+      composer_environment_name: ${{ vars.COMPOSER_ENVIRONMENT_NAME }}
+      service_account_email: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+      GIT_BRANCH_SHA: ${{ inputs.git_branch_sha }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+    
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+          token: ${{ secrets.ghPAT }}
+
+      - id: 'secrtes'
+        uses: ./.github/workflows/dbt-secret-manager-helper.yml
+        with:
+          env-id: ${{ inputs.env_id }}
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+          access_token_lifetime: 300s
+
+      - name: Get images versions
+        id: 'versions'
+        working-directory: ${{ matrix.dirs }}
+        run: |
+              sqlfluff_version=$(yq -r '.sqlfluff.version | select(. != null)' VERSIONS)
+              sqlfluff_image=$(yq -r '.sqlfluff.docker-image | select(. != null)' VERSIONS)
+              orchestrator_version=$(yq -r '.orchestrator.version | select(. != null)' VERSIONS)
+              orchestrator_image=$(yq -r '.orchestrator.docker-image | select(. != null)' VERSIONS)
+              dbt_version=$(yq -r '.dbt.version | select(. != null)' VERSIONS)
+              dbt_image=$(yq -r '.dbt.docker-image | select(. != null)' VERSIONS)
+              echo "sqlfluff_version=$sqlfluff_version" >> $GITHUB_OUTPUT
+              echo "sqlfluff_image=$sqlfluff_image" >> $GITHUB_OUTPUT
+              echo "orchestrator_version=$orchestrator_version" >> $GITHUB_OUTPUT
+              echo "orchestrator_image=$orchestrator_image" >> $GITHUB_OUTPUT  
+              echo "dbt_version=$dbt_version" >> $GITHUB_OUTPUT
+              echo "dbt_image=$dbt_image" >> $GITHUB_OUTPUT  
+
+      - name: Checking required ENV Variables (Test)
+        id: 'check-required-vars-test'
+        if: ${{ inputs.env_id == 'test' }}
+        env:
+          dbt_image_full: "${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}"
+        working-directory: "${{ matrix.dirs }}"
+        run: |
+                echo 'All variables are defined.'
+                echo 'Importing Variables from Airflow Secret yml file.'
+                echo 'Updating Airflow_SECRET_NAME:'
+                secret_key=$(grep -Eo '^[a-zA-Z0-9_]+:' $airflow_secret_file_name | head -n 1 | tr -d ':')
+                sed -i 's/^'''${secret_key}''':/'''${secret_key}_${{ env.GIT_BRANCH_SHA}}:'''/' $airflow_secret_file_name
+                echo 'Updating DAG_ID:'
+                dag_id=$(grep 'DAG_ID:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+                sed -i 's/DAG_ID.*/DAG_ID: '''${dag_id}_${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+                echo 'Updating MANIFEST_NAME:'
+                manifest_name=$(grep 'MANIFEST_NAME:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+                sed -i 's/MANIFEST_NAME.*/MANIFEST_NAME: '''${manifest_name}_${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+                echo 'Updating TARGET:'
+                target=$(grep 'TARGET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$target" ]; then
+                        echo "TARGET: is empty - adding variable."
+                        sed -i '$ a\  TARGET: '''${DBT_TARGET}'''' $airflow_secret_file_name
+                else
+                        sed -i 's/TARGET.*/TARGET: '''${DBT_TARGET}'''/' $airflow_secret_file_name
+                fi
+                echo 'Updating GIT_BRANCH_SHA:'
+                GIT_BRANCH_SHA=$(grep 'GIT_BRANCH_SHA:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$GIT_BRANCH_SHA" ]; then
+                        echo "GIT_BRANCH_SHA: is empty - adding variable."
+                        sed -i '$ a\  GIT_BRANCH_SHA: '''${{ env.GIT_BRANCH_SHA}}'''' $airflow_secret_file_name
+                else
+                        sed -i 's/GIT_BRANCH_SHA.*/GIT_BRANCH_SHA: '''${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+                fi
+                echo 'Updating GITLINK_SECRET:'
+                gitlink_secret=$(grep 'GITLINK_SECRET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$gitlink_secret" ]
+                  then
+                        echo "GITLINK_SECRET: is empty - adding variable."
+                        domain=$(echo $GITHUB_SERVER_URL | sed -E 's/^\s*.*:\/\///g')
+                        path=$GITHUB_REPOSITORY
+                        git_url="https://${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}@${domain}/${path}.git"
+                        sed -i '$ a\  GITLINK_SECRET: '''${git_url}'''' $airflow_secret_file_name
+                else
+                        echo 'No need to update GITLINK_SECRET: exists!'
+                fi
+
+                echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
+                shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$shared_gitlink_secret" ]
+                  then
+                        echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
+                        shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                        sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
+                else
+                        echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
+                fi
+
+                echo 'Updating GIT_BRANCH:'
+                git_branch=$(grep 'GIT_BRANCH:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$git_branch" ]; then
+                        echo "GIT_BRANCH: is empty - adding variable."
+                        sed -i '$ a\  GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''' $airflow_secret_file_name
+                else
+                        sed -i 's/GIT_BRANCH.*/GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''/' $airflow_secret_file_name
+                fi
+
+                echo 'Updating IMAGE:'
+                image=$(grep 'IMAGE:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$image" ]; then
+                        echo "IMAGE: is empty - adding variable."
+                        sed -i '$ a\  IMAGE: '''${dbt_image_full}'''' $airflow_secret_file_name
+                else
+                        sed -i 's|IMAGE.*|IMAGE: '''${dbt_image_full}'''|' $airflow_secret_file_name
+                fi
+
+                echo 'Updating DAG_SCHEDULE_INTERVAL:'
+                last_day=$(date -d "$(date +'%Y')-12-31" +%F)
+                cron_date=$(date -d "$last_day" +'%M %H %d %m *')
+                sed -i "s/DAG_SCHEDULE_INTERVAL.*/DAG_SCHEDULE_INTERVAL: '$cron_date'/" "$airflow_secret_file_name"
+                platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+                echo "platform=$platform" >> $GITHUB_ENV
+      - name: Checking required ENV Variables (Prod)
+        id: 'check-required-vars-prod'
+        if: ${{ inputs.env_id == 'prod' }}
+        working-directory: "${{ matrix.dirs }}"
+        env:
+          dbt_image_full: "${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}"
+        run: |
+                echo 'Importing Variables from Airflow Secret yml file.'
+                echo 'Updating GITLINK_SECRET:'
+                gitlink_secret=$(grep 'GITLINK_SECRET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$gitlink_secret" ]
+                  then
+                        echo "GITLINK_SECRET: is empty - adding variable."
+                        domain=$(echo $GITHUB_SERVER_URL | sed -E 's/^\s*.*:\/\///g')
+                        path=$GITHUB_REPOSITORY
+                        git_url="https://${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}@${domain}/${path}.git"
+                        sed -i '$ a\  GITLINK_SECRET: '''${git_url}'''' $airflow_secret_file_name
+                else
+                        echo 'No need to update GITLINK_SECRET: exists!'
+                fi
+                echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
+                shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$shared_gitlink_secret" ]
+                  then
+                        echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
+                        shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                        sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
+                else
+                        echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
+                fi
+                echo 'Updating IMAGE:'
+                image=$(grep 'IMAGE:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$image" ]; then
+                        echo "IMAGE: is empty - adding variable."
+                        sed -i '$ a\  IMAGE: '''${dbt_image_full}'''' $airflow_secret_file_name
+                else
+                        sed -i 's|IMAGE.*|IMAGE: '''${dbt_image_full}'''|' $airflow_secret_file_name
+                fi
+                echo 'Updating TARGET:'
+                target=$(grep 'TARGET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                if [ -z "$target" ]; then
+                        echo "TARGET: is empty - adding variable."
+                        sed -i '$ a\  TARGET: '''${DBT_TARGET}'''' $airflow_secret_file_name
+                else
+                        sed -i 's/TARGET.*/TARGET: '''${DBT_TARGET}'''/' $airflow_secret_file_name
+                fi
+                gitlink_secret=$(grep 'GITLINK_SECRET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+                platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+                echo "platform=$platform" >> $GITHUB_ENV
+
+  # TODO (CS): Combine test and prod steps    
+      - name: Import Variables (TEST)
+        id: 'import-variables-test'
+        if: ${{ inputs.env_id == 'test' }}
+        uses: 'addnab/docker-run-action@v3'
+        with:
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+          registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
+          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
+          options: -v ${{ github.workspace }}:/dbt -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }}  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json  -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true
+          run: |
+                cd /dbt/${{ matrix.dirs }}
+                echo "Checking Platform"
+                if [ "$platform" = "Composer" ]; then
+                  echo "Platform Composer."
+                  echo 'Importing Secrets to Airflow vault.'
+                  export GOOGLE_CLOUD_PROJECT=${{ vars.COMPOSER_GCP_PROJECT }}
+                  gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS --project=${{ vars.COMPOSER_GCP_PROJECT }}
+                  python /usr/app/tsb-data-orchestrator-core/create_variables_airflow_bauth.op.py
+                  echo 'Save Airflow Secret Key name to Artifacts...'
+                  airflow_secret_key=$(grep -Eo '^[a-zA-Z0-9_]+:' $airflow_secret_file_name | head -n 1 | tr -d ':')
+                  echo "$platform=${airflow_secret_key}" >>  airflow_secret_key.log
+                fi
+
+      - name: Import Variables (PROD)
+        id: 'import-variables-prod'
+        if: ${{ inputs.env_id == 'prod' }}
+        uses: addnab/docker-run-action@v3
+        with:
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+          registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
+          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
+          options: -v ${{ github.workspace }}:/dbt -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }}  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json  -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true
+          run: |
+                cd /dbt/${{ matrix.dirs }}
+                echo "Checking Platform"
+                if [ "$platform" = "Composer" ]; then
+                  echo "Platform Composer."
+                  echo 'Importing Secrets to Airflow vault.'
+                  export GOOGLE_CLOUD_PROJECT=${{ vars.COMPOSER_GCP_PROJECT }}
+                  gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS --project=${{ vars.COMPOSER_GCP_PROJECT }}
+                  python /usr/app/tsb-data-orchestrator-core/create_variables_airflow_bauth.op.py
+                fi
+
+      - name: Archive airflow artifact
+        uses: actions/upload-artifact@v3
+        continue-on-error: true
+        with:
+          name: airflow-artifact-${{ github.head_ref }}
+          retention-days: 7
+          path: |
+            ${{ matrix.dirs }}/airflow_secret_key.log
