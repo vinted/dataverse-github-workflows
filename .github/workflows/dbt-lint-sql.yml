@@ -1,0 +1,129 @@
+name: dbt-lint-sql
+
+on:
+  workflow_call:
+    inputs:
+      env_id: 
+        description: "Whether to use 'test' or 'prod' environment"
+        type: string
+        default: test
+      dirs-matrix:
+        type: string
+        required: true
+        description: list of changed dirs
+      git_branch_sha: 
+        description: "git branch hash"
+        type: string
+        required: true
+      dbt-target:
+        description: "DBT target"
+        type: string
+        default: test
+    secrets:
+      GH_SECRET_PRIVATE_ACCESS_TOKEN:
+        required: true
+      GH_SECRET_PRIVATE_ACCESS_NAME:
+        required: true
+      ghPAT:
+        required: true
+
+jobs:
+  check-required-vars:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env_id }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        dirs: ${{ fromJson(inputs.dirs-matrix) }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.ghPAT }}
+      - id: 'auth-dv'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.DV_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account:  ${{ vars.DV_SECRETS_SERVICE_ACCOUNT_EMAIL }}
+          create_credentials_file: true
+          access_token_lifetime: 3600s
+      - id: 'secrets'
+        uses: 'google-github-actions/get-secretmanager-secrets@v1'
+        with:
+          secrets: |-
+            gh-private-access-name:${{ secrets.GH_SECRET_PRIVATE_ACCESS_NAME }}
+            gh-private-access-token:${{ secrets.GH_SECRET_PRIVATE_ACCESS_TOKEN }}
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v1'
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+          access_token_lifetime: 300s
+      - name: Get images versions
+        id: versions
+        working-directory: ${{ matrix.dirs }}
+        run: |
+                sqlfluff_version=$(yq -r '.sqlfluff.version | select(. != null)' VERSIONS)
+                sqlfluff_image=$(yq -r '.sqlfluff.docker-image | select(. != null)' VERSIONS)
+                orchestrator_version=$(yq -r '.orchestrator.version | select(. != null)' VERSIONS)
+                orchestrator_image=$(yq -r '.orchestrator.docker-image | select(. != null)' VERSIONS)
+                dbt_version=$(yq -r '.dbt.version | select(. != null)' VERSIONS)
+                dbt_image=$(yq -r '.dbt.docker-image | select(. != null)' VERSIONS)
+                echo "sqlfluff_version=$sqlfluff_version" >> $GITHUB_OUTPUT
+                echo "sqlfluff_image=$sqlfluff_image" >> $GITHUB_OUTPUT
+                echo "orchestrator_version=$orchestrator_version" >> $GITHUB_OUTPUT
+                echo "orchestrator_image=$orchestrator_image" >> $GITHUB_OUTPUT  
+                echo "dbt_version=$dbt_version" >> $GITHUB_OUTPUT
+                echo "dbt_image=$dbt_image" >> $GITHUB_OUTPUT           
+      - name: update target for sql fluff
+        working-directory: ${{ matrix.dirs }}
+        run: |
+                target=$(grep 'target =' .sqlfluff | tail -n1 | awk '{ print $3}') || true
+                input_target=${{ inputs.dbt-target }}
+                if [ -z "$target" ]; then
+                        echo "target: is empty - adding variable."
+                        echo "[sqlfluff:templater:dbt]" >> .sqlfluff
+                        echo "target = ${input_target}" >>  .sqlfluff
+                else
+                        sed -i 's/target = .*/target =  '''${input_target}'''/' .sqlfluff
+                fi
+
+      - name: sqlfluff docker action
+        uses: addnab/docker-run-action@v3
+        with:
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+          registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
+          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
+          options: -v ${{ github.workspace }}:/dbt -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json -e GIT_BRANCH_SHA=${{ inputs.git-branch-sha }} -v ${{ env.GOOGLE_APPLICATION_CREDENTIALS }}:/tmp/key.json:ro
+          run: |
+                export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                export GIT_BRANCH_SHA="${{ inputs.git-branch-sha }}"
+                cd /dbt/${{ matrix.dirs }}
+                dbt deps
+                sqlfluff lint -p 8 . 2>&1 | tee -a sqlfuff-lint.log
+      - name: Check lint output
+        continue-on-error: true
+        working-directory: ${{ matrix.dirs }}
+        run: |
+
+              while read line
+              do
+                read_line=$(echo "${line}" | grep -io  "FAIL" | wc -l) || true
+                if [[ $read_line = 1 ]];then
+                    echo 'Error found in SQL Lint Log File.'
+                    sleep 5
+                    exit 1
+                fi
+              done < sqlfuff-lint.log
+      - name: Archive report artifacts
+        uses: actions/upload-artifact@v3
+        continue-on-error: true
+        with:
+          name: sqlfuff-lint
+          retention-days: 7
+          path: |
+            ${{ matrix.dirs }}/sqlfuff-lint.log
