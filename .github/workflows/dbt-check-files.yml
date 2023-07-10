@@ -60,19 +60,12 @@ jobs:
             exit 1
           fi
           
-          required_attributes=(DAG_ID \
-            DAG_TAG \
-            DAG_SCHEDULE_INTERVAL \
-            MANIFEST_NAME \
-            DBT_SEED \
-            DBT_SNAPSHOT \
-            DBT_SEED_SHARDING \ 
-            DBT_SNAPSHOT_SHARDING \
+          required_attributes=(DAG_ID DAG_TAG DAG_SCHEDULE_INTERVAL MANIFEST_NAME DBT_SEED DBT_SNAPSHOT DBT_SEED_SHARDING DBT_SNAPSHOT_SHARDING \
             DATA_QUALITY \
             GIT_URL \
             NAMESPACE \
             PLATFORM \
-            POD_NAME \ 
+            POD_NAME \
             DBT_PROJECT_NAME)
           
           for attribute in "${required_attributes[@]}"; do
