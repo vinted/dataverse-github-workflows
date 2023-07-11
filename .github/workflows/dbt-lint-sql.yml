@@ -28,7 +28,7 @@ on:
         required: true
 
 jobs:
-  check-required-vars:
+  lint-sql:
     runs-on: ubuntu-latest
     environment: ${{ inputs.env_id }}
     permissions:
