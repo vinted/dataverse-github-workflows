@@ -54,7 +54,7 @@ jobs:
 
       - name: get-dv-secrets
         id: secrets
-        uses: ./dataverse-actions/actions/dbt-secret-manager-helper.yml
+        uses: ./dataverse-actions/composite-actions/secret-manager-helper/action.yml
         with: 
           gcp_service_account: ${{ vars.DV_SECRETS_SERVICE_ACCOUNT_EMAIL }}
           workload_identity_provider: ${{ vars.DV_WORKLOAD_IDENTITY_PROVIDER }}

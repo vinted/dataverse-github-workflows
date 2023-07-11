@@ -5,25 +5,18 @@ description: helper action to read secrets from secret manager
 inputs:
   gcp_service_account:
     description: "Email address or unique identifier of the Google Cloud service account"
-    type: string
   workload_identity_provider:
     description: "The full identifier of the Workload Identity Provider, including the project number, pool name, and provider name."
-    type: string
   gh_secret_access_name_reference:
     description: "Long reference in secret manager to github secret access name"
-    type: string
     default: projects/498819875840/secrets/dv-gh-private-access-name
   gh_secret_access_token_reference:
     description: "Long reference in secret manager to github secret access token"
-    type: string
     default: projects/498819875840/secrets/dv-gh-private-access-token/versions/2
 
 
 runs:
-  using: 
-  permissions:
-    contents: 'read'
-    id-token: 'write'
+  using: composite
    
   steps:
     - id: 'auth-dv'
