@@ -24,6 +24,12 @@ on:
         required: true
 
 jobs:
+
+  secrets:
+    uses: vinted/dataverse-github-workflows/.github/workflows/dbt-secret-manager-helper.yml@master
+    with:
+      env-id: ${{ inputs.env_id }}
+
   compile-manifest:
     environment: ${{ inputs.env_id }}
     runs-on: ubuntu-latest
@@ -48,10 +54,6 @@ jobs:
           fetch-depth: 2
           token: ${{ secrets.ghPAT }}
 
-      - id: 'secrets'
-        uses: vinted/dataverse-github-workflows/.github/workflows/dbt-secret-manager-helper.yml@master
-        with:
-          env-id: ${{ inputs.env_id }}
 
       - id: 'auth'
         uses: 'google-github-actions/auth@v1'
@@ -123,7 +125,7 @@ jobs:
               if [ -z "$shared_gitlink_secret" ]
                 then
                       echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
-                      shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                      shared_git_url="${{ jobs.secrets.outputs.gh-private-access-name }}:${{ jobs.secrets.outputs.gh-private-access-token }}"
                       sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
               else
                       echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
@@ -150,7 +152,7 @@ jobs:
                 if [ -z "$shared_gitlink_secret" ]
                   then
                         echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
-                        shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                        shared_git_url="${{ jobs.secrets.outputs.gh-private-access-name }}:${{ jobs.secrets.outputs.gh-private-access-token }}"
                         sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
                 else
                         echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
@@ -180,7 +182,7 @@ jobs:
           options: -v ${{ github.workspace }}:/dbt -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e target=${{ env.target }} -e manifest_name=${{ env.manifest_name }} -e platform=${{ env.platform }} -e GOOGLE_APPLICATION_CREDENTIALS=/dbt/${{ matrix.dirs }}/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/dbt/${{ matrix.dirs }}/key.json:ro -e GIT_BRANCH=${{ env.GITHUB_REF_NAME }} -e GIT_BRANCH_SHA=${{ env.GIT_BRANCH_SHA}}
           run: |
                 cd /dbt/${{ matrix.dirs }}
-                export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ jobs.secrets.outputs.gh-private-access-name }}:${{ jobs.secrets.outputs.gh-private-access-token }}"
                 dbt deps
                 dbt compile --exclude test_type:generic test_type:singular package:re_data --target $target
                 echo "End DBT Compilation procedure."
@@ -208,7 +210,7 @@ jobs:
           options: -v ${{ github.workspace }}:/dbt -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e manifest_name=${{ env.manifest_name }} -e platform=${{ env.platform }} -e GOOGLE_APPLICATION_CREDENTIALS=/dbt/${{ matrix.dirs }}/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/dbt/${{ matrix.dirs }}/key.json:ro
           run: |
                 cd /dbt/${{ matrix.dirs }}
-                export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ jobs.secrets.outputs.gh-private-access-name }}:${{ jobs.secrets.outputs.gh-private-access-token }}"
                 dbt deps
                 dbt compile --exclude test_type:generic test_type:singular package:re_data  --target prod
                 echo "End DBT Compilation procedure."
