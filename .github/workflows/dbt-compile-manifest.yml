@@ -52,7 +52,7 @@ jobs:
           token: ${{ secrets.ghPAT }}
 
       - name: get-dv-secrets
-        id: secrets
+        id: get-dv-secrets
         uses: ./dataverse-actions/composite-actions/secret-manager-helper
         with: 
           gcp_service_account: ${{ vars.DV_SECRETS_SERVICE_ACCOUNT_EMAIL }}
