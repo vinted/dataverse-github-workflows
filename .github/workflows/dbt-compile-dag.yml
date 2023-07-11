@@ -1,4 +1,4 @@
-name: dbt-compile-manifest
+name: dbt-compile-dag
 
 on:
   workflow_call:
@@ -19,39 +19,60 @@ on:
         type: string
         required: true
         description: environment id. test or prod.
+      gh_secret_access_name_reference:
+        description: "Long reference in secret manager to github secret access name"
+        default: projects/498819875840/secrets/dv-gh-private-access-name
+        type: string
+      gh_secret_access_token_reference:
+        description: "Long reference in secret manager to github secret access token"
+        default: projects/498819875840/secrets/dv-gh-private-access-token/versions/2
+        type: string
     secrets:
       ghPAT:
         required: true
 
 jobs:
-  compile-manifest:
+  compile-dag:
     environment: ${{ inputs.env_id }}
     runs-on: ubuntu-latest
     env:
       DBT_TARGET: ${{ inputs.dbt-target }}
       airflow_secret_file_name: ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
+      airflow_url: ${{ vars.COMPOSER_AIRFLOW_URL }}
+      project_id: ${{ vars.COMPOSER_GCP_PROJECT }}
+      location: ${{ vars.COMPOSER_LOCATION }}
+      composer_environment_name: ${{ vars.COMPOSER_ENVIRONMENT_NAME }}
+      service_account_email: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
       GCP_BUCKET_NAME: ${{ vars.COMPOSER_GCS_BUCKET_NAME }}
       GITHUB_REF_NAME: ${{ github.head_ref }}
       GIT_BRANCH_SHA: ${{ inputs.git_branch_sha }}
     permissions:
-      contents: write
+      contents: read
       id-token: write
-      issues: write
-      pull-requests: write
     strategy:
       matrix:
         dirs: ${{ fromJson(inputs.dirs-matrix) }}
 
     steps:
+      - id: "auth-dv"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.DV_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DV_SECRETS_SERVICE_ACCOUNT_EMAIL }}
+          create_credentials_file: true
+          access_token_lifetime: 3600s
+
+      - id: "secrets"
+        uses: "google-github-actions/get-secretmanager-secrets@v1"
+        with:
+          secrets: |-
+            gh-private-access-name:${{ inputs.gh_secret_access_name_reference }}
+            gh-private-access-token:${{ inputs.gh_secret_access_token_reference }}
+
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 2
           token: ${{ secrets.ghPAT }}
-
-      - id: "secrtes"
-        uses: ./.github/workflows/dbt-secret-manager-helper.yml
-        with:
-          env-id: ${{ inputs.env_id }}
 
       - id: "auth"
         uses: "google-github-actions/auth@v1"
@@ -81,10 +102,11 @@ jobs:
       - name: Checking required ENV Variables (Test)
         id: "check-required-vars-test"
         if: ${{ inputs.env_id == 'test' }}
+        env:
+          dbt_image_full: "${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}"
+
         working-directory: "${{ matrix.dirs }}"
         run: |
-          echo 'Importing Variables from Airflow Secret yml file.'
-
           echo 'Updating Airflow_SECRET_NAME:'
           secret_key=$(grep -Eo '^[a-zA-Z0-9_]+:' $airflow_secret_file_name | head -n 1 | tr -d ':')
           sed -i 's/^'''${secret_key}''':/'''${secret_key}_${{ env.GIT_BRANCH_SHA}}:'''/' $airflow_secret_file_name
@@ -110,50 +132,17 @@ jobs:
           else
                   sed -i 's/GIT_BRANCH_SHA.*/GIT_BRANCH_SHA: '''${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
           fi
-          echo 'Updating GIT_BRANCH:'
-          git_branch=$(grep 'GIT_BRANCH:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
-          if [ -z "$git_branch" ]; then
-                  echo "GIT_BRANCH: is empty - adding variable."
-                  sed -i '$ a\  GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''' $airflow_secret_file_name
-          else
-                  sed -i 's/GIT_BRANCH.*/GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''/' $airflow_secret_file_name
-          fi
-          echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
-          shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
-          if [ -z "$shared_gitlink_secret" ]
+          echo 'Updating GITLINK_SECRET:'
+          gitlink_secret=$(grep 'GITLINK_SECRET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+          if [ -z "$gitlink_secret" ]
             then
-                  echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
-                  shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
-                  sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
+                  echo "GITLINK_SECRET: is empty - adding variable."
+                  domain=$(echo $GITHUB_SERVER_URL | sed -E 's/^\s*.*:\/\///g')
+                  path=$GITHUB_REPOSITORY
+                  git_url="https://${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}@${domain}/${path}.git"
+                  sed -i '$ a\  GITLINK_SECRET: '''${git_url}'''' $airflow_secret_file_name
           else
-                  echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
-          fi
-
-          manifest_name=$(grep 'MANIFEST_NAME:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
-          target=$(grep 'TARGET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
-          platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
-          echo "manifest_name=$manifest_name" >> $GITHUB_ENV
-          echo "target=$target" >> $GITHUB_ENV
-          echo "platform=$platform" >> $GITHUB_ENV
-
-      - name: Checking required ENV Variables (Prod)
-        id: "check-required-vars-prod"
-        if: ${{ inputs.env_id == 'prod' }}
-        working-directory: "${{ matrix.dirs }}"
-        env:
-          dbt_image_full: "${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}"
-        run: |
-          echo 'Importing Variables from Airflow Secret yml file.'
-          manifest_name=$(grep 'MANIFEST_NAME:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
-          echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
-          shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
-          if [ -z "$shared_gitlink_secret" ]
-            then
-                  echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
-                  shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
-                  sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
-          else
-                  echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
+                  echo 'No need to update GITLINK_SECRET: exists!'
           fi
           echo 'Updating IMAGE:'
           image=$(grep 'IMAGE:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
@@ -163,69 +152,123 @@ jobs:
           else
                   sed -i 's|IMAGE.*|IMAGE: '''${dbt_image_full}'''|' $airflow_secret_file_name
           fi
+          echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
+          shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+          if [ -z "$shared_gitlink_secret" ]
+            then
+                  echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
+                  shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                  sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
+          else
+                  echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
+          fi
+          echo 'Updating GIT_BRANCH:'
+          git_branch=$(grep 'GIT_BRANCH:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+          if [ -z "$git_branch" ]; then
+                  echo "GIT_BRANCH: is empty - adding variable."
+                  sed -i '$ a\  GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''' $airflow_secret_file_name
+          else
+                  sed -i 's/GIT_BRANCH.*/GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''/' $airflow_secret_file_name
+          fi
+          echo 'Importing Variables from Airflow Secret yml file.'
           platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
-          echo "manifest_name=$manifest_name" >> $GITHUB_ENV
+          dbt_project_name=$(grep 'DBT_PROJECT_NAME:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+          source_commit_id=${GITHUB_SHA::7}
           echo "platform=$platform" >> $GITHUB_ENV
+          echo "dbt_project_name=$dbt_project_name" >> $GITHUB_ENV
+          echo "source_commit_id=$source_commit_id" >> $GITHUB_ENV
+          echo "dag_id=${dag_id}_${{ env.GIT_BRANCH_SHA}}" >> $GITHUB_ENV
 
-      # TODO (CS): Combine test and prod steps
-      - name: Compile and Upload DBT (TEST)
-        id: "compile-and-upload-test"
+      - name: Checking required ENV Variables (Prod)
+        id: "check-required-vars-prod"
+        if: ${{ inputs.env_id == 'prod' }}
+        working-directory: "${{ matrix.dirs }}"
+        env:
+          dbt_image_full: "${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}"
+        run: |
+          echo 'Importing Variables from Airflow Secret yml file.'
+          echo 'Updating IMAGE:'
+          image=$(grep 'IMAGE:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+          if [ -z "$image" ]; then
+                  echo "IMAGE: is empty - adding variable."
+                  sed -i '$ a\  IMAGE: '''${dbt_image_full}'''' $airflow_secret_file_name
+          else
+                  sed -i 's|IMAGE.*|IMAGE: '''${dbt_image_full}'''|' $airflow_secret_file_name
+          fi
+          platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+          source_commit_id=${GITHUB_SHA::7}
+          echo "platform=$platform" >> $GITHUB_ENV
+          echo "source_commit_id=$source_commit_id" >> $GITHUB_ENV
+
+      - name: Compile and upload DAG (Test)
         if: ${{ inputs.env_id == 'test' }}
-        uses: "addnab/docker-run-action@v3"
+        uses: addnab/docker-run-action@v3
         with:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
           registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
-          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
-          options: -v ${{ github.workspace }}:/dbt -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e target=${{ env.target }} -e manifest_name=${{ env.manifest_name }} -e platform=${{ env.platform }} -e GOOGLE_APPLICATION_CREDENTIALS=/dbt/${{ matrix.dirs }}/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/dbt/${{ matrix.dirs }}/key.json:ro -e GIT_BRANCH=${{ env.GITHUB_REF_NAME }} -e GIT_BRANCH_SHA=${{ env.GIT_BRANCH_SHA}}
+          image: ${{steps.versions.outputs.orchestrator_image}}:${{steps.versions.outputs.orchestrator_version}}
+          options: -v ${{ github.workspace }}:/dbt -e dbt_project_name=${{ env.dbt_project_name }} -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }} -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true -e GOOGLE_CLOUD_PROJECT=${{ vars.COMPOSER_GCP_PROJECT }} -e GITHUB_REF_NAME=${{ github.head_ref }} -e GIT_BRANCH_SHA=${{ env.GIT_BRANCH_SHA}}
           run: |
             cd /dbt/${{ matrix.dirs }}
-            export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
-            dbt deps
-            dbt compile --exclude test_type:generic test_type:singular package:re_data --target $target
-            echo "End DBT Compilation procedure."
+            cat dbt_airflow_variables.yaml
+            gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS --project=${{ vars.COMPOSER_GCP_PROJECT }}
+            python /usr/app/tsb-data-orchestrator-core/create_dag_from_template.py
+            echo 'Updating DAG file name for PR e2e testing.'
+            mv ${{ env.dag_id }}_dag.py ${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py
+            echo 'End DBT Project DAG Compilation procedure.'
+            echo "Checking Platform"
             if [ "$platform" = "Composer" ]; then
               echo "Platform Composer."
-              echo "Checking required env variables."
+              echo "Checking Required Composer env Variables."
               echo 'All variables are defined.'
-              echo 'Uploading Manifest file to Composer GCS Bucket main catalog'
-              gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS
-              gsutil cp ./target/manifest.json gs://$GCP_BUCKET_NAME/dags/main/${manifest_name}.json
-              echo 'Uploading Manifest file to Composer GCS Bucket - finished.'
-              echo 'Save Manifest file path to Artifacts...'
-              echo "$platform=gs://$GCP_BUCKET_NAME/dags/main/${manifest_name}.json" >> compile_manifest_path.log
+              echo 'Uploading DAG file to Composer GCS Bucket'
+              gsutil -m cp -r ./${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py  gs://$GCP_BUCKET_NAME/dags/${{ matrix.dirs }}/
+              echo 'Checking-Renewing TSB DBT Parser Libraries.'
+              gsutil -m rsync -r -c /usr/app/tsb-data-orchestrator-core/main/ gs://$GCP_BUCKET_NAME/dags/main/
+              echo 'Checking-Renewing TSB DBT Parser Libraries - finished.'
+              echo 'Upload - finished.'
+              echo 'Save DAG file path to Artifacts...'
+              echo "$platform=gs://$GCP_BUCKET_NAME/dags/${{ matrix.dirs }}/${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py" >> compile_dag_path.log
             fi
 
-      - name: Compile and Upload DBT (PROD)
-        id: "check-required-vars-prod"
+      - name: Compile and upload DAG (Prod)
         if: ${{ inputs.env_id == 'prod' }}
         uses: addnab/docker-run-action@v3
         with:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
           registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
-          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
-          options: -v ${{ github.workspace }}:/dbt -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e manifest_name=${{ env.manifest_name }} -e platform=${{ env.platform }} -e GOOGLE_APPLICATION_CREDENTIALS=/dbt/${{ matrix.dirs }}/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/dbt/${{ matrix.dirs }}/key.json:ro
+          image: ${{steps.versions.outputs.orchestrator_image}}:${{steps.versions.outputs.orchestrator_version}}
+          options: -v ${{ github.workspace }}:/dbt -e dbt_project_name=${{ env.dbt_project_name }} -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }} -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true -e GOOGLE_CLOUD_PROJECT=${{ vars.COMPOSER_GCP_PROJECT }} -e GITHUB_REF_NAME=${{ github.head_ref }} -e GIT_BRANCH_SHA=${{ env.GIT_BRANCH_SHA}}
           run: |
             cd /dbt/${{ matrix.dirs }}
-            export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
-            dbt deps
-            dbt compile --exclude test_type:generic test_type:singular package:re_data  --target prod
-            echo "End DBT Compilation procedure."
+            cat dbt_airflow_variables.yaml
+            gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS --project=${{ vars.COMPOSER_GCP_PROJECT }}
+            python /usr/app/tsb-data-orchestrator-core/create_dag_from_template.py
+            echo 'Updating DAG file name for PR e2e testing.'
+            mv ${{ env.dag_id }}_dag.py ${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py
+            echo 'End DBT Project DAG Compilation procedure.'
+            echo "Checking Platform"
             if [ "$platform" = "Composer" ]; then
               echo "Platform Composer."
-              echo 'Uploading Manifest file to Composer GCS Bucket main catalog'
-              gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS
-              gsutil cp ./target/manifest.json gs://$GCP_BUCKET_NAME/dags/main/${manifest_name}.json
-              echo 'Uploading Manifest file to Composer GCS Bucket - finished.'
+              echo "Checking Required Composer env Variables."
+              echo 'All variables are defined.'
+              echo 'Uploading DAG file to Composer GCS Bucket'
+              gsutil -m cp -r ./${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py  gs://$GCP_BUCKET_NAME/dags/${{ matrix.dirs }}/
+              echo 'Checking-Renewing TSB DBT Parser Libraries.'
+              gsutil -m rsync -r -c /usr/app/tsb-data-orchestrator-core/main/ gs://$GCP_BUCKET_NAME/dags/main/
+              echo 'Checking-Renewing TSB DBT Parser Libraries - finished.'
+              echo 'Upload - finished.'
+              echo 'Save DAG file path to Artifacts...'
+              echo "$platform=gs://$GCP_BUCKET_NAME/dags/${{ matrix.dirs }}/${{ env.dbt_project_name }}_$GIT_BRANCH_SHA.py" >> compile_dag_path.log
             fi
-
-      - name: Archive DBT compile artifact (Test)
+      - name: Archive dag artifact
+        if: ${{ inputs.env_id == 'test' }}
         uses: actions/upload-artifact@v3
         continue-on-error: true
-        if: ${{ inputs.env_id == 'test' }}
         with:
-          name: dbt-compile-artifact-${{ github.head_ref }}
+          name: dag-artifact-${{ github.head_ref }}
           retention-days: 7
           path: |
-            ${{ matrix.dirs }}/compile_manifest_path.log
+            ${{ matrix.dirs }}/compile_dag_path.log
