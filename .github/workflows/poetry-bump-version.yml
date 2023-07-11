@@ -15,7 +15,7 @@ on:
       GH_PRIVATE_ACCESS_TOKEN:
         required: true
     outputs:
-      new-version: 
+      new-version:
         description: new release
         value: ${{ jobs.poetry.outputs.new-version }}
 
@@ -24,12 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new-version: ${{ steps.bump-version.outputs.new-version }}
-      
+
     steps:
-      - uses: 'actions/checkout@v3'
+      - uses: "actions/checkout@v3"
         with:
           token: ${{ secrets.GH_PRIVATE_ACCESS_TOKEN }}
-      
+
       - id: setup-python
         uses: actions/setup-python@v4
         with:
@@ -43,12 +43,12 @@ jobs:
       - id: install-bump-version-plugin
         run: poetry self add poetry-bumpversion
 
-      - id: 'bump-version'
+      - id: "bump-version"
         run: |
           cd ${{ inputs.cf-folder }}
           poetry version patch
           echo "new-version=$(poetry version --short)" >> $GITHUB_OUTPUT
-      
+
       - uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: bump version of ${{ inputs.cf-folder }}

@@ -23,7 +23,7 @@ jobs:
       image: cytopia/yamllint
     strategy:
       matrix:
-        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+        dirs: ${{ fromJson(inputs.dirs-matrix) }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -36,15 +36,15 @@ jobs:
         continue-on-error: true
         working-directory: ${{ matrix.dirs }}
         run: |
-              while read line
-              do
-                read_line=$(echo "${line}" | grep -io  "error" | wc -l) || true
-                if [[ $read_line = 1 ]];then
-                    echo 'Error found in SQL Lint Log File.'
-                    sleep 5
-                    exit 1
-                fi
-              done < yamllint_lint.log
+          while read line
+          do
+            read_line=$(echo "${line}" | grep -io  "error" | wc -l) || true
+            if [[ $read_line = 1 ]];then
+                echo 'Error found in SQL Lint Log File.'
+                sleep 5
+                exit 1
+            fi
+          done < yamllint_lint.log
       - name: Archive report artifacts
         uses: actions/upload-artifact@v3
         continue-on-error: true

@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        dirs: ${{ fromJson(inputs.dirs-matrix) }} 
+        dirs: ${{ fromJson(inputs.dirs-matrix) }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -36,7 +36,7 @@ jobs:
             yamllint-config.yaml \
             .sqlfluff \
             profiles.yml)
-          
+
           for file in "${required_files[@]}"; do
             if [ ! -f $file ]; then
               echo "required file $file does not exists."
@@ -59,7 +59,7 @@ jobs:
             echo "OPERATOR should be set to 'k8s'"
             exit 1
           fi
-          
+
           required_attributes=(DAG_ID DAG_TAG DAG_SCHEDULE_INTERVAL MANIFEST_NAME DBT_SEED DBT_SNAPSHOT DBT_SEED_SHARDING DBT_SNAPSHOT_SHARDING \
             DATA_QUALITY \
             GIT_URL \
@@ -67,7 +67,7 @@ jobs:
             PLATFORM \
             POD_NAME \
             DBT_PROJECT_NAME)
-          
+
           for attribute in "${required_attributes[@]}"; do
             if [[ $(grep "${attribute}:" ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }} | tail -n1 | awk '{ print $2}') == "" ]]; then
               echo "Required attriute: ${attribute} is missing in file ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}"

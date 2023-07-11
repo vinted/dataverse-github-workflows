@@ -3,7 +3,7 @@ name: dbt-check-env
 on:
   workflow_call:
     inputs:
-      env_id: 
+      env_id:
         description: "Whether to use 'test' or 'prod' environment"
         type: string
         default: test
@@ -71,5 +71,3 @@ jobs:
             echo "WORKLOAD_IDENTITY_PROVIDER variable is not set or empty"
             exit 1
           fi
-    
-

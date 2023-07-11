@@ -1,4 +1,4 @@
-name: upload-cloud-function 
+name: upload-cloud-function
 
 on:
   workflow_call:
@@ -28,27 +28,26 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     if: "${{ inputs.release-tag != '' }}"
     steps:
+      - uses: "actions/checkout@v3"
 
-      - uses: 'actions/checkout@v3'
-
-      - id: 'archive'
+      - id: "archive"
         run: |
           zip_target=${{ inputs.cf-folder }}-v${{ inputs.release-tag }}.zip
           cd ${{ inputs.cf-folder }} && zip -r "${zip_target}" .
           echo "zip_file=${{ inputs.cf-folder }}/${zip_target}" >> ${GITHUB_OUTPUT}
-      - id: 'auth'
-        uses: 'google-github-actions/auth@v1'
+      - id: "auth"
+        uses: "google-github-actions/auth@v1"
         with:
           workload_identity_provider: ${{ inputs.workload_identity_provider }}
           service_account: ${{ inputs.gcp_service_account }}
           access_token_lifetime: 300s
 
-      - id: 'upload-archive'
-        uses:  'google-github-actions/upload-cloud-storage@v1'
+      - id: "upload-archive"
+        uses: "google-github-actions/upload-cloud-storage@v1"
         with:
           path: ${{ steps.archive.outputs.zip_file }}
           destination: ${{ inputs.gcp_bucket }}/${{ inputs.cf-folder }}
