@@ -49,7 +49,7 @@ jobs:
           token: ${{ secrets.ghPAT }}
 
       - id: 'secrtes'
-        uses: vinted/dataverse-github-workflows/.github/workflows/dbt-secret-manager-helper.yml
+        uses: vinted/dataverse-github-workflows/.github/workflows/dbt-secret-manager-helper.yml@master
         with:
           env-id: ${{ inputs.env_id }}
 
