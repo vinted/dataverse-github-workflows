@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 2
           token: ${{ secrets.ghPAT }}
 
-      - id: 'secrtes'
+      - id: 'secrets'
         uses: vinted/dataverse-github-workflows/.github/workflows/dbt-secret-manager-helper.yml@master
         with:
           env-id: ${{ inputs.env_id }}
