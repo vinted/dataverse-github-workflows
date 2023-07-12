@@ -1,0 +1,189 @@
+name: dbt-e2e-test-add-label
+
+on:
+  workflow_call:
+    inputs:
+      dirs-matrix:
+        type: string
+        required: true
+        description: list of changed dirs
+      git_branch_sha:
+        description: "git branch hash"
+        type: string
+        required: true
+      dbt-target:
+        description: "DBT target"
+        type: string
+        default: test
+      gh_secret_access_name_reference:
+        description: "Long reference in secret manager to github secret access name"
+        default: projects/498819875840/secrets/dv-gh-private-access-name
+        type: string
+      gh_secret_access_token_reference:
+        description: "Long reference in secret manager to github secret access token"
+        default: projects/498819875840/secrets/dv-gh-private-access-token/versions/2
+        type: string
+    secrets:
+      ghPAT:
+        required: true
+
+jobs:
+  add-label:
+    environment: test
+    runs-on: ubuntu-latest
+    env:
+      DBT_TARGET: ${{ inputs.dbt-target }}
+      airflow_secret_file_name: ${{ vars.COMPOSER_AIRFLOW_SECRET_FILE_NAME }}
+      airflow_url: ${{ vars.COMPOSER_AIRFLOW_URL }}
+      project_id: ${{ vars.COMPOSER_GCP_PROJECT }}
+      location: ${{ vars.COMPOSER_LOCATION }}
+      composer_environment_name: ${{ vars.COMPOSER_ENVIRONMENT_NAME }}
+      service_account_email: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+      GCP_BUCKET_NAME: ${{ vars.COMPOSER_GCS_BUCKET_NAME }}
+      GITHUB_REF_NAME: ${{ github.head_ref }}
+      GIT_BRANCH_SHA: ${{ inputs.git_branch_sha }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        dirs: ${{ fromJson(inputs.dirs-matrix) }}
+
+    steps:
+      - id: "auth-dv"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.DV_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DV_SECRETS_SERVICE_ACCOUNT_EMAIL }}
+          create_credentials_file: true
+          access_token_lifetime: 3600s
+
+      - id: "secrets"
+        uses: "google-github-actions/get-secretmanager-secrets@v1"
+        with:
+          secrets: |-
+            gh-private-access-name:${{ inputs.gh_secret_access_name_reference }}
+            gh-private-access-token:${{ inputs.gh_secret_access_token_reference }}
+
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.ghPAT }}
+
+      - id: "auth"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.DBT_DEPLOY_SERVICE_ACCOUNT_EMAIL }}
+          access_token_lifetime: 300s
+
+      - name: Download dag_run artifact
+        uses: actions/download-artifact@v3
+        id: dag_run_artifact
+        with:
+          name: dag-run-id-artifact
+          path: ${{ matrix.dirs }}
+
+      - name: Get images versions
+        id: "versions"
+        working-directory: ${{ matrix.dirs }}
+        run: |
+          sqlfluff_version=$(yq -r '.sqlfluff.version | select(. != null)' VERSIONS)
+          sqlfluff_image=$(yq -r '.sqlfluff.docker-image | select(. != null)' VERSIONS)
+          orchestrator_version=$(yq -r '.orchestrator.version | select(. != null)' VERSIONS)
+          orchestrator_image=$(yq -r '.orchestrator.docker-image | select(. != null)' VERSIONS)
+          dbt_version=$(yq -r '.dbt.version | select(. != null)' VERSIONS)
+          dbt_image=$(yq -r '.dbt.docker-image | select(. != null)' VERSIONS)
+          echo "sqlfluff_version=$sqlfluff_version" >> $GITHUB_OUTPUT
+          echo "sqlfluff_image=$sqlfluff_image" >> $GITHUB_OUTPUT
+          echo "orchestrator_version=$orchestrator_version" >> $GITHUB_OUTPUT
+          echo "orchestrator_image=$orchestrator_image" >> $GITHUB_OUTPUT  
+          echo "dbt_version=$dbt_version" >> $GITHUB_OUTPUT
+          echo "dbt_image=$dbt_image" >> $GITHUB_OUTPUT
+
+      - name: Checking required ENV Variables (Test)
+        id: "check-required-vars-test"
+        working-directory: "${{ matrix.dirs }}"
+        run: |
+          echo 'All variables are defined.'
+           echo 'Updating variables for PR e2e testing.'
+           echo 'Updating Airflow_SECRET_NAME:'
+           secret_key=$(grep -Eo '^[a-zA-Z0-9_]+:' $airflow_secret_file_name | head -n 1 | tr -d ':')
+           sed -i 's/^'''${secret_key}''':/'''${secret_key}_${{ env.GIT_BRANCH_SHA}}:'''/' $airflow_secret_file_name
+           echo 'Updating DAG_ID:'
+           dag_id=$(grep 'DAG_ID:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+           sed -i 's/DAG_ID.*/DAG_ID: '''${dag_id}_${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+           echo 'Updating MANIFEST_NAME:'
+           manifest_name=$(grep 'MANIFEST_NAME:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+           sed -i 's/MANIFEST_NAME.*/MANIFEST_NAME: '''${manifest_name}_${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+           echo 'Updating TARGET:'
+           target=$(grep 'TARGET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+           if [ -z "$target" ]; then
+                   echo "TARGET: is empty - adding variable."
+                   sed -i '$ a\  TARGET: '''${DBT_TARGET}'''' $airflow_secret_file_name
+           else
+                   sed -i 's/TARGET.*/TARGET: '''${DBT_TARGET}'''/' $airflow_secret_file_name
+           fi
+           echo 'Updating GIT_BRANCH_SHA:'
+           GIT_BRANCH_SHA=$(grep 'GIT_BRANCH_SHA:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+           if [ -z "$GIT_BRANCH_SHA" ]; then
+                   echo "GIT_BRANCH_SHA: is empty - adding variable."
+                   sed -i '$ a\  GIT_BRANCH_SHA: '''${{ env.GIT_BRANCH_SHA}}'''' $airflow_secret_file_name
+           else
+                   sed -i 's/GIT_BRANCH_SHA.*/GIT_BRANCH_SHA: '''${{ env.GIT_BRANCH_SHA}}'''/' $airflow_secret_file_name
+           fi
+           echo 'Updating GITLINK_SECRET:'
+           gitlink_secret=$(grep 'GITLINK_SECRET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+           if [ -z "$gitlink_secret" ]
+             then
+                   echo "GITLINK_SECRET: is empty - adding variable."
+                   domain=$(echo $GITHUB_SERVER_URL | sed -E 's/^\s*.*:\/\///g')
+                   path=$GITHUB_REPOSITORY
+                   git_url="https://${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}@${domain}/${path}.git"
+                   sed -i '$ a\  GITLINK_SECRET: '''${git_url}'''' $airflow_secret_file_name
+           else
+                   echo 'No need to update GITLINK_SECRET: exists!'
+           fi
+           echo 'Updating DBT_ENV_SECRET_GIT_CREDENTIAL:'
+           shared_gitlink_secret=$(grep 'DBT_ENV_SECRET_GIT_CREDENTIAL:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+           if [ -z "$shared_gitlink_secret" ]
+             then
+                   echo "DBT_ENV_SECRET_GIT_CREDENTIAL: is empty - adding variable."
+                   shared_git_url="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+                   sed -i '$ a\  DBT_ENV_SECRET_GIT_CREDENTIAL: '''${shared_git_url}'''' $airflow_secret_file_name
+           else
+                   echo 'No need to update DBT_ENV_SECRET_GIT_CREDENTIAL: exists!'
+           fi
+           echo 'Updating GIT_BRANCH:'
+           git_branch=$(grep 'GIT_BRANCH:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}') || true
+           if [ -z "$git_branch" ]; then
+                   echo "GIT_BRANCH: is empty - adding variable."
+                   sed -i '$ a\  GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''' $airflow_secret_file_name
+           else
+                   sed -i 's/GIT_BRANCH.*/GIT_BRANCH: '''${{ env.GITHUB_REF_NAME }}'''/' $airflow_secret_file_name
+           fi
+           echo 'Importing Variables from Airflow Secret yml file.'
+           platform=$(grep 'PLATFORM:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+           dag_id=$(grep 'DAG_ID:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+           TARGET=$(grep 'TARGET:' $airflow_secret_file_name | tail -n1 | awk '{ print $2}')
+           echo "dag_id=$dag_id" >> $GITHUB_ENV
+           echo "platform=$platform" >> $GITHUB_ENV
+           echo "TARGET=$TARGET" >> $GITHUB_ENV
+
+      - name: Add labels
+        uses: addnab/docker-run-action@v3
+        with:
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+          registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
+          image: ${{steps.versions.outputs.dbt_image}}:${{steps.versions.outputs.dbt_version}}
+          options: -v ${{ github.workspace }}:/dbt -e DATASET_LABEL_VALUE=${{ vars.TEST_DATASET_LABEL_VALUE }} -e DATASET_LABEL_KEY=${{ vars.TEST_DATASET_LABEL_KEY }} -e TARGET=${{ env.TARGET }} -e GCP_BUCKET_NAME=${{ env.GCP_BUCKET_NAME }} -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }}  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json  -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true -e dag_id=${{ env.dag_id }} -e GOOGLE_CLOUD_PROJECT=${{ vars.COMPOSER_GCP_PROJECT }} -e GIT_BRANCH=${{ env.GITHUB_REF_NAME}} -e GIT_BRANCH_SHA=${{ env.GIT_BRANCH_SHA}}
+          run: |
+            cd /dbt/${{ matrix.dirs }}
+            export DBT_ENV_SECRET_GIT_CREDENTIAL="${{ steps.secrets.outputs.gh-private-access-name }}:${{ steps.secrets.outputs.gh-private-access-token }}"
+            gcloud auth login --cred-file=$GOOGLE_APPLICATION_CREDENTIALS --project=${{ vars.COMPOSER_GCP_PROJECT }}
+            if [ "$platform" = "Composer" ]; then
+              echo "Platform Composer."
+              bash /usr/app/dbt/dbt_bq_dataset_label_add.sh
+            fi
