@@ -70,7 +70,6 @@ jobs:
 
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 2
           token: ${{ secrets.ghPAT }}
 
       - id: "auth"
@@ -239,7 +238,7 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
           registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
-          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
+          image: ${{steps.versions.outputs.orchestrator_image}}:${{steps.versions.outputs.orchestrator_version}}
           options: -v ${{ github.workspace }}:/dbt -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }}  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json  -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true
           run: |
             cd /dbt/${{ matrix.dirs }}
@@ -263,7 +262,7 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
           registry: ${{ vars.ARTIFACT_REGISTRY_HOST }}
-          image: ${{steps.versions.outputs.sqlfluff_image}}:${{steps.versions.outputs.sqlfluff_version}}
+          image: ${{steps.versions.outputs.orchestrator_image}}:${{steps.versions.outputs.orchestrator_version}}
           options: -v ${{ github.workspace }}:/dbt -e airflow_url=${{ env.airflow_url }} -e airflow_secret_file_name=${{ env.airflow_secret_file_name }} -e platform=${{ env.platform }} -e project_id=${{ env.project_id }} -e location=${{ env.location }} -e composer_environment_name=${{ env.composer_environment_name }} -e service_account_email=${{ env.service_account_email }}  -e GOOGLE_APPLICATION_CREDENTIALS=/tmp/key.json  -v ${{ env.GOOGLE_GHA_CREDS_PATH }}:/tmp/key.json:ro -e workload_identity=true
           run: |
             cd /dbt/${{ matrix.dirs }}
